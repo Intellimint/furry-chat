@@ -14,3 +14,6 @@ build/
 .env
 
 .DS_Store
+
+# Ignore cache files
+.codemint-frontend/node_modules 2/.cache/
