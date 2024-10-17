@@ -3,7 +3,9 @@ import styled from 'styled-components';
 import axios from 'axios';
 import EnhancedMessage from './MessageHelper';
 import SpinningLoader from './LoaderHelper';
+import { debounce } from 'lodash';  // Install lodash if needed: npm install lodash
 
+// Styled components (same as before)
 const ChatWindowWrapper = styled.div`
   display: flex;
   flex-direction: column;
@@ -58,17 +60,26 @@ const SendButton = styled.button`
 `;
 
 const ChatWindow = ({ initialMessages = [], onMessagesUpdate = () => {} }) => {
-  const [messages, setMessages] = useState(initialMessages || []);
+  const [messages, setMessages] = useState(initialMessages);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const messagesEndRef = useRef(null);
   const textAreaRef = useRef(null);
 
+  // Debounced version of onMessagesUpdate to prevent rapid updates
+  const debouncedUpdate = useCallback(
+    debounce((newMessages) => {
+      onMessagesUpdate(newMessages);
+    }, 300),
+    [onMessagesUpdate]
+  );
+
   useEffect(() => {
-    console.log('Initial messages:', initialMessages);
-    setMessages(initialMessages || []);
-  }, [initialMessages]);
+    if (messages !== initialMessages) {
+      debouncedUpdate(messages);
+    }
+  }, [messages, initialMessages, debouncedUpdate]);
 
   useEffect(() => {
     scrollToBottom();
@@ -81,56 +92,45 @@ const ChatWindow = ({ initialMessages = [], onMessagesUpdate = () => {} }) => {
     }
   }, [inputMessage]);
 
-  const updateMessages = useCallback((newMessages) => {
-    console.log('Updating messages:', newMessages);
-    onMessagesUpdate(newMessages);
-  }, [onMessagesUpdate]);
-
-  useEffect(() => {
-    updateMessages(messages);
-  }, [messages, updateMessages]);
-
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const sendMessageToAI = async (message) => {
     try {
-      setIsLoading(true);
       const response = await axios.post('http://localhost:8000/chat', {
         message,
-        session_id: sessionId
+        session_id: sessionId,
       });
       setSessionId(response.data.session_id);
       return response.data.message;
     } catch (error) {
       console.error('Error sending message to AI:', error);
       return 'Sorry, I encountered an error. Please try again.';
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (inputMessage.trim() && !isLoading) {
-      const userMessage = { role: 'user', content: inputMessage };
-      setMessages(prevMessages => {
-        const newMessages = [...prevMessages, userMessage];
-        console.log('New messages after user input:', newMessages);
-        return newMessages;
-      });
-      setInputMessage('');
       setIsLoading(true);
+      const userMessage = { role: 'user', content: inputMessage };
 
-      const aiResponse = await sendMessageToAI(inputMessage);
-      const aiMessage = { role: 'assistant', content: aiResponse };
-      setMessages(prevMessages => {
-        const newMessages = [...prevMessages, aiMessage];
-        console.log('New messages after AI response:', newMessages);
-        return newMessages;
-      });
-      setIsLoading(false);
+      // Update messages with user input
+      setMessages((prevMessages) => [...prevMessages, userMessage]);
+      setInputMessage('');
+
+      try {
+        const aiResponse = await sendMessageToAI(inputMessage);
+        const aiMessage = { role: 'assistant', content: aiResponse };
+
+        // Update messages with AI response
+        setMessages((prevMessages) => [...prevMessages, aiMessage]);
+      } catch (error) {
+        console.error('Error during AI response handling:', error);
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -146,7 +146,7 @@ const ChatWindow = ({ initialMessages = [], onMessagesUpdate = () => {} }) => {
       <MessagesWrapper>
         {messages.map((message, index) => (
           <EnhancedMessage
-            key={index}
+            key={`${message.role}-${index}`}
             content={message.content}
             isUser={message.role === 'user'}
           />
@@ -171,4 +171,4 @@ const ChatWindow = ({ initialMessages = [], onMessagesUpdate = () => {} }) => {
   );
 };
 
-export default ChatWindow;
+export default React.memo(ChatWindow);

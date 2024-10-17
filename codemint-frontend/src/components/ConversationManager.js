@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Trash2, Edit2, ChevronLeft, ChevronRight } from 'react-feather';
 import ChatWindow from './ChatWindow';
+import LZString from 'lz-string';  // For compression
+
+const MAX_CONVERSATIONS = 500;  // Limit the number of stored conversations
+const MAX_MESSAGES_PER_CONVERSATION = 5000;  // Limit the number of messages per conversation
 
 const ConversationManagerWrapper = styled.div`
   display: flex;
@@ -140,9 +144,9 @@ const ToggleSidebarButton = styled.button`
   transform: ${props => (props.isOpen ? 'none' : 'translateX(0)')};
   transition: left 0.3s ease;
   border: none;
-  background: lightgrey; /* Light grey background for the toggle button */
+  background: lightgrey;
   cursor: pointer;
-  color: black; /* Adjust the icon color */
+  color: black;
 `;
 
 const ConversationManager = () => {
@@ -152,29 +156,41 @@ const ConversationManager = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const savedConversations = localStorage.getItem('conversations');
-    if (savedConversations) {
-      try {
-        const parsedConversations = JSON.parse(savedConversations);
-        setConversations(parsedConversations);
-        if (parsedConversations.length > 0) {
-          setCurrentConversationId(parsedConversations[parsedConversations.length - 1].id);
-          setIsSidebarOpen(true);  // Open sidebar if there are existing conversations
+    const loadConversations = () => {
+      const savedConversations = localStorage.getItem('conversations');
+      if (savedConversations) {
+        try {
+          const decompressedData = LZString.decompress(savedConversations);
+          const parsedConversations = JSON.parse(decompressedData);
+          setConversations(parsedConversations.slice(-MAX_CONVERSATIONS));
+          if (parsedConversations.length > 0) {
+            setCurrentConversationId(parsedConversations[parsedConversations.length - 1].id);
+            setIsSidebarOpen(true);
+          }
+        } catch (error) {
+          console.error('Error parsing conversations:', error);
+          createNewConversation();
         }
-      } catch (error) {
-        console.error('Error parsing conversations:', error);
+      } else {
+        createNewConversation();
       }
-    }
+    };
 
-    const savedSidebarState = localStorage.getItem('sidebarOpen');
-    if (savedSidebarState !== null) {
-      setIsSidebarOpen(savedSidebarState === 'true');
-    }
+    loadConversations();
   }, []);
 
   useEffect(() => {
+    const saveConversations = () => {
+      try {
+        const compressedData = LZString.compress(JSON.stringify(conversations));
+        localStorage.setItem('conversations', compressedData);
+      } catch (error) {
+        console.error('Error saving conversations:', error);
+      }
+    };
+
     if (conversations.length > 0) {
-      localStorage.setItem('conversations', JSON.stringify(conversations));
+      saveConversations();
     } else {
       localStorage.removeItem('conversations');
     }
@@ -196,10 +212,8 @@ const ConversationManager = () => {
       messages: [],
       title: `Conversation ${conversations.length + 1}`,
     };
-    setConversations(prevConversations => [...prevConversations, newConversation]);
+    setConversations(prevConversations => [...prevConversations, newConversation].slice(-MAX_CONVERSATIONS));
     setCurrentConversationId(newConversation.id);
-
-    // Automatically open the sidebar when creating the first conversation
     setIsSidebarOpen(true);
   };
 
@@ -210,7 +224,7 @@ const ConversationManager = () => {
   const updateConversation = (id, newMessages) => {
     setConversations(prevConversations =>
       prevConversations.map(conv =>
-        conv.id === id ? { ...conv, messages: newMessages } : conv
+        conv.id === id ? { ...conv, messages: newMessages.slice(-MAX_MESSAGES_PER_CONVERSATION) } : conv
       )
     );
   };
@@ -219,7 +233,6 @@ const ConversationManager = () => {
     setConversations(prevConversations => {
       const updatedConversations = prevConversations.filter(conv => conv.id !== id);
 
-      // Handle sidebar and current conversation state after deletion
       if (currentConversationId === id) {
         if (updatedConversations.length > 0) {
           setCurrentConversationId(updatedConversations[updatedConversations.length - 1].id);
@@ -228,12 +241,11 @@ const ConversationManager = () => {
         }
       }
 
-      // Keep the sidebar open even after deleting the last conversation
       if (updatedConversations.length === 0) {
-        setIsSidebarOpen(true);  // Sidebar stays open for creating new conversations
+        setIsSidebarOpen(true);
       }
 
-      return updatedConversations;
+      return updatedConversations.slice(-MAX_CONVERSATIONS);
     });
   };
 
